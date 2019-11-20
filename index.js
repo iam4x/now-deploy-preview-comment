@@ -2,18 +2,21 @@ const axios = require('axios');
 const { stripIndents } = require('common-tags');
 const { Toolkit } = require('actions-toolkit');
 
-if (!process.env.ZEIT_TOKEN) {
+const actionConfig = {
+  zeitToken: process.env.ZEIT_TOKEN,
+  teamId: process.env.ZEIT_TEAMID,
+  deployedCommit: process.env.GITHUB_SHA,
+  deployedBranch: process.env.GITHUB_REF,
+};
+
+if (!actionConfig.zeitToken) {
   throw new Error(`ZEIT_TOKEN environment variable is not set`);
 }
 
 const zeitAPIClient = axios.create({
   baseURL: 'https://api.zeit.co',
-  headers: {
-    Authorization: `Bearer ${process.env.ZEIT_TOKEN}`,
-  },
-  params: {
-    teamId: process.env.ZEIT_TEAMID || undefined,
-  },
+  headers: { Authorization: `Bearer ${actionConfig.zeitToken}` },
+  params: { teamId: actionConfig.teamId },
 });
 
 // Run your GitHub Action!
@@ -23,12 +26,9 @@ Toolkit.run(async tools => {
     issue_number: tools.context.payload.pull_request.number,
   });
 
-  const zeitPreviewURLComment = comments.find(comment =>
-    comment.body.startsWith('Deploy preview for _website_ ready!')
-  );
-
   let deploymentUrl;
   let deploymentCommit;
+  let deploymentProjectName;
 
   const {
     data: {
@@ -36,11 +36,12 @@ Toolkit.run(async tools => {
     },
   } = await zeitAPIClient.get('/v4/now/deployments', {
     params: {
-      'meta-commit': process.env.GITHUB_SHA,
+      'meta-commit': actionConfig.deployedCommit,
     },
   });
 
   if (commitDeployment) {
+    deploymentProjectName = commitDeployment.name;
     deploymentUrl = commitDeployment.url;
     deploymentCommit = commitDeployment.meta.commit;
   } else {
@@ -50,11 +51,12 @@ Toolkit.run(async tools => {
       },
     } = await zeitAPIClient.get('/v4/now/deployments', {
       params: {
-        'meta-branch': process.env.GITHUB_REF,
+        'meta-branch': actionConfig.deployedBranch,
       },
     });
 
     if (lastBranchDeployment) {
+      deploymentProjectName = lastBranchDeployment.name;
       deploymentUrl = lastBranchDeployment.url;
       deploymentCommit = lastBranchDeployment.meta.commit;
     } else {
@@ -69,14 +71,20 @@ Toolkit.run(async tools => {
       });
 
       if (lastDeployment) {
+        deploymentProjectName = lastDeployment.name;
         deploymentUrl = lastDeployment.url;
         deploymentCommit = lastDeployment.meta.commit;
       }
     }
   }
 
+  const commentFirstSentence = `Deploy preview for _${deploymentProjectName}_ ready!`;
+  const zeitPreviewURLComment = comments.find(comment =>
+    comment.body.startsWith(commentFirstSentence)
+  );
+
   const commentBody = stripIndents`
-    Deploy preview for _website_ ready!
+    ${commentFirstSentence}
 
     Built with commit ${deploymentCommit}
 
