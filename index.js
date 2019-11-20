@@ -21,62 +21,37 @@ const zeitAPIClient = axios.create({
 
 // Run your GitHub Action!
 Toolkit.run(async tools => {
-  const { data: comments } = await tools.github.issues.listComments({
-    ...tools.context.repo,
-    issue_number: tools.context.payload.pull_request.number,
-  });
+  function fetchLastDeployment(params) {
+    return zeitAPIClient
+      .get('/v4/now/deployments', { params })
+      .then(({ data }) => data.deployments[0]);
+  }
+
+  const strategies = [
+    fetchLastDeployment({ 'meta-commit': actionConfig.deployedCommit }),
+    fetchLastDeployment({ 'meta-branch': actionConfig.deployedBranch }),
+    fetchLastDeployment({ limit: 1 }),
+  ];
 
   let deploymentUrl;
   let deploymentCommit;
   let deploymentProjectName;
 
-  const {
-    data: {
-      deployments: [commitDeployment],
-    },
-  } = await zeitAPIClient.get('/v4/now/deployments', {
-    params: {
-      'meta-commit': actionConfig.deployedCommit,
-    },
-  });
+  for (const strategy of strategies) {
+    const deployment = await strategy();
 
-  if (commitDeployment) {
-    deploymentProjectName = commitDeployment.name;
-    deploymentUrl = commitDeployment.url;
-    deploymentCommit = commitDeployment.meta.commit;
-  } else {
-    const {
-      data: {
-        deployments: [lastBranchDeployment],
-      },
-    } = await zeitAPIClient.get('/v4/now/deployments', {
-      params: {
-        'meta-branch': actionConfig.deployedBranch,
-      },
-    });
-
-    if (lastBranchDeployment) {
-      deploymentProjectName = lastBranchDeployment.name;
-      deploymentUrl = lastBranchDeployment.url;
-      deploymentCommit = lastBranchDeployment.meta.commit;
-    } else {
-      const {
-        data: {
-          deployments: [lastDeployment],
-        },
-      } = await zeitAPIClient.get('/v4/now/deployments', {
-        params: {
-          limit: 1,
-        },
-      });
-
-      if (lastDeployment) {
-        deploymentProjectName = lastDeployment.name;
-        deploymentUrl = lastDeployment.url;
-        deploymentCommit = lastDeployment.meta.commit;
-      }
+    if (deployment) {
+      deploymentProjectName = deployment.name;
+      deploymentUrl = deployment.url;
+      deploymentCommit = deployment.meta.commit;
+      break;
     }
   }
+
+  const { data: comments } = await tools.github.issues.listComments({
+    ...tools.context.repo,
+    issue_number: tools.context.payload.pull_request.number,
+  });
 
   const commentFirstSentence = `Deploy preview for _${deploymentProjectName}_ ready!`;
   const zeitPreviewURLComment = comments.find(comment =>
