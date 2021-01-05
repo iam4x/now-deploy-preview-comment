@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "actions-toolkit": "^2.1.0",
-    "axios": "~0.18.1",
+    "axios": "~0.21.1",
     "common-tags": "^1.8.0"
   },
   "devDependencies": {
